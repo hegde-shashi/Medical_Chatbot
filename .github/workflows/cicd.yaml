@@ -60,14 +60,30 @@ jobs:
             # ensure aws CLI is available (needed for ECR login)
             if ! command -v aws >/dev/null 2>&1; then
               echo "aws CLI missing, installing..."
+              # make sure we have pip if we need it
+              if ! command -v pip >/dev/null 2>&1; then
+                if [ -f /etc/debian_version ]; then
+                  sudo apt-get update && sudo apt-get install -y python3-pip
+                elif [ -f /etc/redhat-release ]; then
+                  sudo yum install -y python3-pip
+                fi
+              fi
+              # try distro package first
               if [ -f /etc/debian_version ]; then
-                sudo apt-get update && sudo apt-get install -y awscli || \
-                  sudo pip install awscli
+                sudo apt-get update && sudo apt-get install -y awscli || true
               elif [ -f /etc/redhat-release ]; then
-                sudo yum install -y awscli || \
+                sudo yum install -y awscli || true
+              fi
+              # if aws still missing, install via pip or bundled installer
+              if ! command -v aws >/dev/null 2>&1; then
+                if command -v pip >/dev/null 2>&1; then
                   sudo pip install awscli
-              else
-                sudo pip install awscli
+                else
+                  # fallback to bundled installer
+                  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+                  unzip awscliv2.zip
+                  sudo ./aws/install
+                fi
               fi
             fi
 
