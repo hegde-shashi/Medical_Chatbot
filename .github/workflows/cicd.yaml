@@ -37,22 +37,31 @@ jobs:
 
   Continuous-Deployment:
     needs: Continuous-Integration
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+      # SSH into EC2 and deploy container
+      - name: Deploy to EC2 instance via SSH
+        uses: appleboy/ssh-action@v0.1.7
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-
-      - name: Run Docker Image to serve users
-        run: |
-         docker run -d -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" -e AWS_DEFAULT_REGION="${{ secrets.AWS_DEFAULT_REGION }}" -e PINECONE_API_KEY="${{ secrets.PINECONE_API_KEY }}" -e GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" -p 3000:3000 "${{ steps.login-ecr.outputs.registry }}"/"${{ secrets.ECR_REPO }}":latest
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
+            # log in to ECR on the remote host
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} \
+              | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+            # pull the new image
+            docker pull ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO }}:latest
+            # stop and remove existing container if present
+            docker stop medical-chatbot || true
+            docker rm medical-chatbot || true
+            # run the updated container
+            docker run -d --name medical-chatbot \
+              -e PINECONE_API_KEY="${{ secrets.PINECONE_API_KEY }}" \
+              -e GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
+              -p 3000:3000 \
+              ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO }}:latest
