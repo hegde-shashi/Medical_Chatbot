@@ -9,6 +9,7 @@ jobs:
   Continuous-Integration:
     runs-on: ubuntu-latest
     outputs:
+      registry: ${{ steps.login-ecr.outputs.registry }}
       image: ${{ steps.build-image.outputs.image }}   # expose image URI to downstream jobs
 
     steps:
@@ -53,9 +54,16 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
           script: |
-            # compute image name from CI job output
+            # compute image name and registry from CI job outputs
             IMAGE="${{ needs.Continuous-Integration.outputs.image }}"
-            REGISTRY="${IMAGE%/*}"
+            REGISTRY="${{ needs.Continuous-Integration.outputs.registry }}"
+            echo "CI reported registry=$REGISTRY"
+            echo "CI reported image =$IMAGE"
+            # fallback: if IMAGE empty, build from registry + repo
+            if [ -z "$IMAGE" ]; then
+              IMAGE="$REGISTRY/${{ secrets.ECR_REPO }}:latest"
+              echo "Falling back to constructed IMAGE=$IMAGE"
+            fi
 
             # ensure aws CLI is available (needed for ECR login)
             if ! command -v aws >/dev/null 2>&1; then
@@ -74,8 +82,13 @@ jobs:
               rm -rf awscliv2.zip aws
             fi
 
+            # export AWS credentials so aws CLI can authenticate
+            export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+            export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+            export AWS_DEFAULT_REGION="${{ secrets.AWS_DEFAULT_REGION }}"
+
             # log in to ECR on the remote host
-            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} \
+            aws ecr get-login-password --region "$AWS_DEFAULT_REGION" \
               | docker login --username AWS --password-stdin "$REGISTRY"
 
             # pull the new image
